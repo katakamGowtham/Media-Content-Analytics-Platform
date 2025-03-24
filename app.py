@@ -28,15 +28,30 @@ st.set_page_config(page_title="Media Analytics Dashboard", layout="wide")
 
 st.title("📊 Media Content Analytics Dashboard")
 
-# Use Tabs instead of Sidebar
+# Tabs 
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["Overview", "Content Insights", "Engagement Trends", "Category Analysis", "Run Custom Query"])
 
 # --------------------- TAB 1: Overview ---------------------
 with tab1:
     st.subheader("📌 Overview of Media Analytics")
 
+    st.write("""
+    The **Media Content Analytics Platform** provides valuable insights into media content performance 
+    by analyzing engagement metrics from YouTube and news sources. This dashboard helps track content 
+    popularity, identify high-engagement categories, and optimize content strategy based on data-driven 
+    decision-making.
+    """)
+
+    st.markdown("""
+    **Key Features of the Dashboard:**  
+    - 📊 **Analyze Content Performance:** Track views, likes, comments, and engagement trends.  
+    - 🔍 **Discover Popular Categories:** Identify the best-performing topics and content types.  
+    - 📅 **Time-Based Analysis:** Understand engagement trends across different time periods.  
+    - 📈 **Interactive Insights:** Filter data dynamically and execute custom SQL queries.  
+    """)
+
     col1, col2, col3 = st.columns(3)
-    
+
     # Total Unique Headlines
     total_headlines = run_query("SELECT COUNT(DISTINCT headline) FROM fact_content;").iloc[0, 0]
     total_headlines = int(total_headlines) if total_headlines is not None else 0
@@ -45,57 +60,69 @@ with tab1:
     total_views = run_query("SELECT SUM(views) FROM dim_engagement;").iloc[0, 0]
     total_views = int(total_views) if total_views is not None else 0
 
-    # Average Engagement Rate
+    # Average Engagement Rate (Multiply by 100 for percentage)
     avg_engagement = run_query("SELECT AVG(engagement_rate) FROM dim_engagement;").iloc[0, 0]
-    avg_engagement = float(avg_engagement) if avg_engagement is not None else 0
+    avg_engagement = float(avg_engagement) * 100 if avg_engagement is not None else 0
 
-    col1.metric("Total Unique Headlines", total_headlines)
-    col2.metric("Total Views", total_views)
-    col3.metric("Avg. Engagement Rate", round(avg_engagement, 4))
+    col1.metric("Total Unique Headlines", f"{total_headlines:,}")
+    col2.metric("Total Views", f"{total_views:,}")
+    col3.metric("Avg. Engagement Rate (%)", f"{round(avg_engagement, 2)}%")
+
+    st.write("""
+    📌 **Why Use This Dashboard?**  
+    - Helps content creators and marketers optimize strategies.  
+    - Provides in-depth analysis of user engagement patterns.  
+    - Assists in making data-driven decisions for better content reach.  
+    """)
+
 
 # --------------------- TAB 2: Content Insights ---------------------
 with tab2:
     st.subheader("🔥 Top Performing Content")
 
+    df = pd.DataFrame()
+
     insight_type = st.radio(
         "Choose Analysis Type:",
-        ["Most Engaging Headlines", "Most Viewed Content", "Most Liked Content", "Most Commented Content", "Highest Engagement Rate"]
+        ["Most Viewed Content", "Most Viewed Content based on headline","Most Liked Content based on headline", "Most Commented Content based on headline", "Highest Engagement Rate"]
     )
 
-    if insight_type == "Most Engaging Headlines":
+    if insight_type == "Most Viewed Content":
         df = run_query("""
-            SELECT DISTINCT f.headline, e.engagement_rate
-            FROM fact_content f
-            JOIN dim_engagement e ON f.engagement_id = e.engagement_id
-            ORDER BY e.engagement_rate DESC
-            LIMIT 10;
+        SELECT DISTINCT c.grouped_category, SUM(e.views) AS total_views
+        FROM fact_content f
+        JOIN dim_engagement e ON f.engagement_id = e.engagement_id
+        JOIN dim_content c ON f.category_id = c.category_id
+        GROUP BY c.grouped_category
+        ORDER BY total_views DESC;
         """)
-    
-    elif insight_type == "Most Viewed Content":
+
+    elif insight_type == "Most Viewed Content based on headline":
         df = run_query("""
             SELECT DISTINCT f.headline, e.views
             FROM fact_content f
             JOIN dim_engagement e ON f.engagement_id = e.engagement_id
             ORDER BY e.views DESC
-            LIMIT 10;
+            LIMIT 100;
         """)
+
     
-    elif insight_type == "Most Liked Content":
+    elif insight_type == "Most Liked Content based on headline":
         df = run_query("""
             SELECT DISTINCT f.headline, e.likes
             FROM fact_content f
             JOIN dim_engagement e ON f.engagement_id = e.engagement_id
             ORDER BY e.likes DESC
-            LIMIT 10;
+            LIMIT 100;
         """)
     
-    elif insight_type == "Most Commented Content":
+    elif insight_type == "Most Commented Content based on headline":
         df = run_query("""
             SELECT DISTINCT f.headline, e.comments
             FROM fact_content f
             JOIN dim_engagement e ON f.engagement_id = e.engagement_id
             ORDER BY e.comments DESC
-            LIMIT 10;
+            LIMIT 100;
         """)
     
     elif insight_type == "Highest Engagement Rate":
@@ -105,7 +132,7 @@ with tab2:
             JOIN dim_engagement e ON f.engagement_id = e.engagement_id
             WHERE e.engagement_rate > 0.05
             ORDER BY e.engagement_rate DESC
-            LIMIT 10;
+            LIMIT 100;
         """)
 
     st.dataframe(df)
@@ -147,10 +174,11 @@ with tab4:
     
     df = run_query(query)
 
+    # Existing Pie Chart: Category-Wise Views Distribution
     fig = px.pie(df, names="grouped_category", values="total_views", title="Category-Wise Views Distribution")
     st.plotly_chart(fig)
 
-    # ✅ FIXED: Corrected grouped_category query
+    # Existing Bar Chart: Number of Posts Per Category
     st.subheader("📊 Number of Posts Per Category")
     df_count = run_query("""
         SELECT c.grouped_category, COUNT(*) AS post_count
@@ -165,6 +193,42 @@ with tab4:
     ax.set_ylabel("Category")
     ax.set_title("Content Count per Category")
     st.pyplot(fig)
+
+    # NEW: Category Engagement Heatmap
+    st.subheader("🔥 Category Engagement Heatmap")
+    df_heatmap = run_query("""
+        SELECT c.grouped_category, d.day_of_week, AVG(e.engagement_rate) AS avg_engagement
+        FROM fact_content f
+        JOIN dim_content c ON f.category_id = c.category_id
+        JOIN dim_engagement e ON f.engagement_id = e.engagement_id
+        JOIN dim_date d ON f.date_id = d.date_id
+        GROUP BY c.grouped_category, d.day_of_week;
+    """)
+
+    pivot_table = df_heatmap.pivot(index="grouped_category", columns="day_of_week", values="avg_engagement")
+    fig, ax = plt.subplots(figsize=(10, 6))
+    sns.heatmap(pivot_table, cmap="coolwarm", annot=True, fmt=".2f", linewidths=0.5, ax=ax)
+    ax.set_title("Category Engagement by Day of the Week")
+    st.pyplot(fig)
+
+    # Category-Wise Engagement Trends Over Time
+    st.subheader("📈 Category Engagement Trends Over Time")
+    df_trends = run_query("""
+        SELECT c.grouped_category, d.month, d.year, SUM(e.views) AS total_views, SUM(e.likes) AS total_likes
+        FROM fact_content f
+        JOIN dim_content c ON f.category_id = c.category_id
+        JOIN dim_engagement e ON f.engagement_id = e.engagement_id
+        JOIN dim_date d ON f.date_id = d.date_id
+        GROUP BY c.grouped_category, d.year, d.month
+        ORDER BY d.year, d.month;
+    """)
+
+    fig = px.line(df_trends, x="month", y=["total_views", "total_likes"], color="grouped_category",
+                  title="Category-Wise Views & Likes Over Time", markers=True)
+    st.plotly_chart(fig)
+
+   
+
 
 # --------------------- TAB 5: Run Custom Query ---------------------
 with tab5:
