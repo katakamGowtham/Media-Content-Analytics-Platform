@@ -4,14 +4,21 @@ import pandas as pd
 import plotly.express as px
 import seaborn as sns
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
+import os
+from os.path import join, dirname
+from dotenv import load_dotenv
+
+dotenv_path = join(dirname(__file__), '.env')
+load_dotenv(dotenv_path)
 
 # --------------------- MySQL Connection ---------------------
 def get_connection():
     return pymysql.connect(
-        host="localhost",
-        user="root",
-        password="Gowtham@#123",
-        database="youtube"
+        host=os.getenv('host'),
+        user=os.getenv('username'),
+        password=os.getenv('password'),
+        database=os.getenv('database')
     )
 
 def run_query(query):
@@ -147,7 +154,7 @@ with tab3:
         FROM fact_content f
         JOIN dim_engagement e ON f.engagement_id = e.engagement_id
         ORDER BY e.engagement_rate DESC
-        LIMIT 10;
+        LIMIT 50;
     """)
 
     fig = px.scatter(df, x="views", y="engagement_rate", size="likes", color="comments", title="Engagement Rate vs Views")
@@ -194,39 +201,45 @@ with tab4:
     ax.set_title("Content Count per Category")
     st.pyplot(fig)
 
-    # NEW: Category Engagement Heatmap
-    st.subheader("🔥 Category Engagement Heatmap")
-    df_heatmap = run_query("""
-        SELECT c.grouped_category, d.day_of_week, AVG(e.engagement_rate) AS avg_engagement
-        FROM fact_content f
-        JOIN dim_content c ON f.category_id = c.category_id
-        JOIN dim_engagement e ON f.engagement_id = e.engagement_id
-        JOIN dim_date d ON f.date_id = d.date_id
-        GROUP BY c.grouped_category, d.day_of_week;
-    """)
-
-    pivot_table = df_heatmap.pivot(index="grouped_category", columns="day_of_week", values="avg_engagement")
-    fig, ax = plt.subplots(figsize=(10, 6))
-    sns.heatmap(pivot_table, cmap="coolwarm", annot=True, fmt=".2f", linewidths=0.5, ax=ax)
-    ax.set_title("Category Engagement by Day of the Week")
-    st.pyplot(fig)
-
-    # Category-Wise Engagement Trends Over Time
-    st.subheader("📈 Category Engagement Trends Over Time")
     df_trends = run_query("""
-        SELECT c.grouped_category, d.month, d.year, SUM(e.views) AS total_views, SUM(e.likes) AS total_likes
-        FROM fact_content f
-        JOIN dim_content c ON f.category_id = c.category_id
-        JOIN dim_engagement e ON f.engagement_id = e.engagement_id
-        JOIN dim_date d ON f.date_id = d.date_id
-        GROUP BY c.grouped_category, d.year, d.month
-        ORDER BY d.year, d.month;
-    """)
+    SELECT c.grouped_category, d.month, d.year, 
+           SUM(e.views) AS total_views, SUM(e.likes) AS total_likes
+    FROM fact_content f
+    JOIN dim_content c ON f.category_id = c.category_id
+    JOIN dim_engagement e ON f.engagement_id = e.engagement_id
+    JOIN dim_date d ON f.date_id = d.date_id
+    GROUP BY c.grouped_category, d.year, d.month
+    ORDER BY d.year, d.month, c.grouped_category;
+""")
 
-    fig = px.line(df_trends, x="month", y=["total_views", "total_likes"], color="grouped_category",
-                  title="Category-Wise Views & Likes Over Time", markers=True)
-    st.plotly_chart(fig)
+# Convert month to string for better plotting
+df_trends['month'] = df_trends['month'].astype(str)
 
+# Sidebar Filter for Categories
+selected_categories = st.multiselect("Select Categories", df_trends["grouped_category"].unique(), default=df_trends["grouped_category"].unique())
+
+# Filter data based on selection
+df_filtered = df_trends[df_trends["grouped_category"].isin(selected_categories)]
+
+st.subheader("📈 Category Engagement Trends Over Time")
+
+# --- Views Over Time ---
+st.write("### 📊 Category-Wise Views Over Time")
+fig, ax = plt.subplots(figsize=(12, 5))
+sns.lineplot(data=df_filtered, x="month", y="total_views", hue="grouped_category", marker="o", ax=ax)
+ax.set_ylabel("Total Views")
+ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f'{int(x):,}'))  # Format numbers with commas
+ax.set_yscale("linear")  # Ensure normal scale
+st.pyplot(fig)
+
+# --- Likes Over Time ---
+st.write("### ❤️ Category-Wise Likes Over Time")
+fig, ax = plt.subplots(figsize=(12, 5))
+sns.lineplot(data=df_filtered, x="month", y="total_likes", hue="grouped_category", marker="o", ax=ax)
+ax.set_ylabel("Total Likes")
+ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f'{int(x):,}'))  # Format numbers with commas
+ax.set_yscale("linear")  # Ensure normal scale
+st.pyplot(fig)
    
 
 
